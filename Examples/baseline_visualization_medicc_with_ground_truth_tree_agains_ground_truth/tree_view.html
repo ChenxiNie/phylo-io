@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tree View</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.2/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.5.0/font/bootstrap-icons.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.2/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="../../dist/src_worker_bcn_js.phylo.js"></script>
+    <script src="../../dist/src_worker_distance_js.phylo.js"></script>
+    <script src="../../dist/phylo.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0; padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #header {
+            padding: 10px 24px;
+            background: #222;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            flex-shrink: 0;
+            z-index: 100;
+        }
+        #header a { color: #aaa; text-decoration: none; font-size: 14px; }
+        #header a:hover { color: white; }
+        #header h2 { margin: 0; font-size: 16px; font-weight: normal; }
+        #header strong { color: #7eb8f7; }
+
+        /* override phylo.io's main layout to stack vertically */
+        main {
+            display: flex !important;
+            flex-direction: column !important;
+            flex: 1;
+            overflow: hidden;
+            flex-wrap: nowrap;
+        }
+
+        /* each container takes exactly half the remaining height */
+        #containerL {
+            flex: 1;
+            border-bottom: 2px solid #ccc !important;
+            border-right: none !important;
+            min-height: 0;
+        }
+
+        #containerR {
+            flex: 1;
+            min-height: 0;
+        }
+
+        /* CN profile floating panel */
+        .cn-panel {
+            position: fixed;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            padding: 12px 16px;
+            z-index: 9999;
+            min-width: 75vw;
+        }
+        .cn-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .cn-panel-title {
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .cn-panel-close {
+            cursor: pointer;
+            color: #999;
+            font-size: 18px;
+            line-height: 1;
+            border: none;
+            background: none;
+            padding: 0 4px;
+        }
+        .cn-panel-close:hover { color: #333; }
+
+        /* make phylo.io settings panels scrollable and float above everything */
+        .menu_settings {
+            position: fixed !important;
+            max-height: 80vh !important;
+            overflow-y: auto !important;
+            top: 40px !important;
+            z-index: 999999 !important;
+        }
+        /* export menu same treatment */
+        .menu_export {
+            position: fixed !important;
+            top: 40px !important;
+            z-index: 999999 !important;
+        }
+        /* allow containers to show overflow so settings panel isn't clipped */
+        #containerL, #containerR {
+            overflow: visible !important;
+        }
+        /* prevent main from creating an isolated stacking context */
+        main {
+            isolation: auto !important;
+        }
+
+        /* tree labels */
+        .tree-label {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.55);
+            color: white;
+            font-size: 13px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            z-index: 10;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <a href="index.html">← Back to dashboard</a>
+    <h2>
+        Leaves <strong id="lbl-leaves">—</strong>
+        &nbsp;|&nbsp; Iteration <strong id="lbl-iteration">—</strong>
+        &nbsp;|&nbsp; Tree length: <strong id="lbl-treelen">—</strong>
+        &nbsp;|&nbsp; Ground truth events: <strong id="lbl-events">—</strong>
+    </h2>
+</div>
+
+<main>
+    <!-- phylo.io will inject containerL and containerR here via JS -->
+</main>
+
+<!-- CN panels are created dynamically by showCNPanel() -->
+
+<script>
+    // --- 1. Read URL parameters ---
+    const params = new URLSearchParams(window.location.search)
+    const leafCount = parseInt(params.get("leaf_count"))
+    const iteration = parseInt(params.get("iteration"))
+
+    // --- 2. Load data.json and find the matching record ---
+    fetch("src/data.json")
+        .then(r => r.json())
+        .then(data => {
+            const record = data.data.find(
+                d => d.leaf_count === leafCount && d.iteration === iteration
+            )
+
+            if (!record) {
+                alert(`No data found for leaf_count=${leafCount}, iteration=${iteration}`)
+                return
+            }
+
+            // --- 3. Populate header ---
+            document.getElementById("lbl-leaves").textContent = leafCount
+            document.getElementById("lbl-iteration").textContent = iteration
+            document.getElementById("lbl-treelen").textContent = record.tree_length_medicc
+            document.getElementById("lbl-events").textContent = record.n_events_ground_truth
+
+            // --- 4. Build containers inside <main> exactly as phylo.io expects ---
+            const m = document.querySelector("main")
+            m.insertAdjacentHTML("beforeend",
+                `<div class="p-2 flex-grow-1" id="containerL" style="background-color: white; position: relative;">
+                    <div class="tree-label">Ground Truth</div>
+                 </div>`)
+            m.insertAdjacentHTML("beforeend",
+                `<div class="p-2 flex-grow-1" id="containerR" style="background-color: white; position: relative;">
+                    <div class="tree-label">medicc2-gt</div>
+                 </div>`)
+
+            // --- 5. Initialise phylo.io ---
+            const phylo = PhyloIO.init()
+            phylo.settings.compareMode = true
+            phylo.phylo_embedded = true
+
+            const c1 = phylo.create_container("containerL")
+            const c2 = phylo.create_container("containerR")
+            phylo.bound_container = [c1, c2]
+
+            c1.add_tree(record.ground_truth_newick, {'use_branch_lenght': true})
+            c1.models[0].set_name("Ground Truth")
+
+            c2.add_tree(record.reconstructed_newick, {'use_branch_lenght': true})
+            c2.models[0].set_name("medicc2-gt")
+
+            phylo.settings.compute_distance = false
+            phylo.settings.compareMode = false  // skip similarity worker during start()
+            phylo.start()
+            phylo.settings.compareMode = true
+
+            // disable autocollapse after start() so it doesn't get overridden
+            c1.viewer.update_collapse_level(0, false)
+            c2.viewer.update_collapse_level(0, false)
+
+            // show branch lengths above the branch line (left_top position)
+            ;[c1, c2].forEach(c => {
+                c.models[0].settings.display_leaf_label_left_top = 'Length'
+                c.models[0].settings.display_internal_label_left_top = 'Length'
+                c.viewer.render(c.viewer.hierarchy)
+            })
+
+            // wire up the CN profile callback — each click creates a new pinned panel
+            phylo.settings.on_show_cn_profile = (nodeName, clickX, clickY, containerId) => {
+                const source = containerId === "containerR" ? "medicc2" : "ground_truth"
+                fetch(`http://localhost:8001/cn_profile?node=${nodeName}&leaf_count=${leafCount}&iteration=${iteration}&source=${source}`)
+                    .then(r => r.json())
+                    .then(rows => showCNPanel(nodeName, rows, clickX, clickY, source))
+                    .catch(() => showCNPanel(nodeName, null, clickX, clickY, source))
+            }
+        })
+
+    function showCNPanel(nodeName, rows, clickX, clickY, source) {
+        // create a fresh panel div each time so previous ones stay visible
+        const panel = document.createElement("div")
+        panel.className = "cn-panel"
+        document.body.appendChild(panel)
+
+        // position near click, keep on screen
+        const px = Math.min(clickX + 16, window.innerWidth - 540)
+        const py = Math.min(clickY - 20, window.innerHeight - 300)
+        panel.style.left = px + "px"
+        panel.style.top = py + "px"
+
+        // header
+        const header = document.createElement("div")
+        header.className = "cn-panel-header"
+        const title = document.createElement("span")
+        title.className = "cn-panel-title"
+        const sourceLabel = source === "medicc2" ? "medicc2" : "ground truth"
+        title.textContent = rows ? `CN Profile [${sourceLabel}] — ${nodeName}` : `No CN data for: ${nodeName}`
+        const closeBtn = document.createElement("button")
+        closeBtn.className = "cn-panel-close"
+        closeBtn.textContent = "✕"
+        closeBtn.onclick = () => panel.remove()
+
+        // make panel draggable by its header
+        let dragX, dragY
+        header.style.cursor = "move"
+        header.addEventListener("mousedown", e => {
+            dragX = e.clientX - panel.offsetLeft
+            dragY = e.clientY - panel.offsetTop
+            const onMove = e => {
+                panel.style.left = (e.clientX - dragX) + "px"
+                panel.style.top  = (e.clientY - dragY) + "px"
+            }
+            const onUp = () => {
+                document.removeEventListener("mousemove", onMove)
+                document.removeEventListener("mouseup", onUp)
+            }
+            document.addEventListener("mousemove", onMove)
+            document.addEventListener("mouseup", onUp)
+        })
+        header.appendChild(title)
+        header.appendChild(closeBtn)
+        panel.appendChild(header)
+
+        if (!rows) return
+
+        const chartDiv = document.createElement("div")
+        panel.appendChild(chartDiv)
+
+        // get unique chromosomes in order
+        const chroms = [...new Set(rows.map(d => d.chrom))]
+
+        const margin = { top: 10, right: 10, bottom: 45, left: 30 }
+        const width = window.innerWidth * 0.7 - margin.left - margin.right
+        const height = 320 - margin.top - margin.bottom
+
+        const svg = d3.select(chartDiv)
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`)
+
+        // x scale — one band per bin, grouped by chrom
+        const x = d3.scaleBand()
+            .domain(rows.map((_, i) => i))
+            .range([0, width])
+            .padding(0.05)
+
+        // y scale — fixed 0-8 for consistent comparison across nodes
+        // lower bound is -0.3 so a step line at cn=0 sits above the axis and is visible
+        const y = d3.scaleLinear()
+            .domain([-0.3, 8])
+            .range([height, 0])
+
+        // alternating grey/white background per bin
+        rows.forEach((d, i) => {
+            svg.insert("rect", ":first-child")
+                .attr("x", x(i)).attr("y", 0)
+                .attr("width", x.bandwidth()).attr("height", height)
+                .attr("fill", i % 2 === 0 ? "#f0f0f0" : "white")
+        })
+
+        // draw cn_b as a step line (bottom allele)
+        svg.append("path")
+            .datum(rows)
+            .attr("fill", "none")
+            .attr("stroke", "#2166ac")
+            .attr("stroke-width", 2)
+            .attr("d", d3.line()
+                .x((d, i) => x(i))
+                .y(d => y(d.cn_b))
+                .curve(d3.curveStepAfter)(rows))
+
+        // draw cn_a as a step line
+        svg.append("path")
+            .datum(rows)
+            .attr("fill", "none")
+            .attr("stroke", "#92c5de")
+            .attr("stroke-width", 2)
+            .attr("d", d3.line()
+                .x((d, i) => x(i))
+                .y(d => y(d.cn_a))
+                .curve(d3.curveStepAfter)(rows))
+
+        // y axis — integer ticks 0-8
+        svg.append("g").call(d3.axisLeft(y).ticks(8).tickFormat(d3.format("d")))
+
+        // chromosome boundary lines + labels
+        chroms.forEach(chrom => {
+            const chromRows = rows.filter(d => d.chrom === chrom)
+            const firstIdx = rows.indexOf(chromRows[0])
+            svg.append("line")
+                .attr("x1", x(firstIdx)).attr("x2", x(firstIdx))
+                .attr("y1", 0).attr("y2", height)
+                .attr("stroke", "#ccc").attr("stroke-width", 1)
+            svg.append("text")
+                .attr("x", x(firstIdx) + 2)
+                .attr("y", height + 18)
+                .style("font-size", "9px")
+                .style("fill", "#666")
+                .text(chrom.replace("chr", ""))
+        })
+
+        // breakpoint bin index labels on x-axis with dashed leader line
+        rows.forEach((d, i) => {
+            if (d.is_breakpoint) {
+                const bx = x(i)
+                // dashed line from top of plot all the way down past x-axis to label
+                svg.append("line")
+                    .attr("x1", bx).attr("x2", bx)
+                    .attr("y1", 0).attr("y2", height + 35)
+                    .attr("stroke", "#c0392b")
+                    .attr("stroke-width", 1)
+                    .attr("stroke-dasharray", "4,3")
+                svg.append("text")
+                    .attr("x", bx)
+                    .attr("y", height + 44)
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "8px")
+                    .style("fill", "#c0392b")
+                    .style("font-weight", "bold")
+                    .text(i)
+            }
+        })
+
+        // legend
+        const leg = svg.append("g").attr("transform", `translate(${width - 80}, 0)`)
+        leg.append("rect").attr("width", 10).attr("height", 10).attr("fill", "#92c5de")
+        leg.append("text").attr("x", 14).attr("y", 9).style("font-size", "10px").text("cn_a (major)")
+        leg.append("rect").attr("y", 14).attr("width", 10).attr("height", 10).attr("fill", "#2166ac")
+        leg.append("text").attr("x", 14).attr("y", 23).style("font-size", "10px").text("cn_b (minor)")
+    }
+</script>
+
+</body>
+</html>

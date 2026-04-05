@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MEDICC2 Baseline Benchmark Visualization</title>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <style>
+        body { font-family: sans-serif; background: #f9f9f9; margin: 0; padding: 40px; font-size: 16px; }
+        h2 { color: #333; }
+        .chart-container { background: white; border-radius: 8px; padding: 20px; margin-bottom: 30px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+        .bar { cursor: pointer; }
+        .bar:hover { opacity: 0.75; }
+    </style>
+</head>
+<body>
+
+<h1 style="color: #222; margin-bottom: 8px;">MEDICC2 Baseline Benchmark</h1>
+
+<div class="chart-container">
+    <h2>Leaves 30 — MEDICC2 Tree Length per Iteration</h2>
+    <div id="chart-30"></div>
+</div>
+
+<div class="chart-container">
+    <h2>Leaves 50 — MEDICC2 Tree Length per Iteration</h2>
+    <div id="chart-50"></div>
+</div>
+
+<script>
+fetch("src/data.json")
+    .then(r => r.json())
+    .then(data => {
+        data.leaf_counts.forEach(leafCount => {
+            // data.json is already sorted ascending by tree_length (done in extract_data.py)
+            const records = data.data
+                .filter(d => d.leaf_count === leafCount)
+
+            drawChart(records, leafCount)
+        })
+    })
+
+function drawChart(records, leafCount) {
+    const color = leafCount === 30 ? "steelblue" : "darkorange"
+    const containerId = `chart-${leafCount}`
+
+    const margin = { top: 40, right: 30, bottom: 70, left: 70 }
+    const width = 1800 - margin.left - margin.right
+    const height = 500 - margin.top - margin.bottom
+
+    const svg = d3.select(`#${containerId}`)
+        .append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`)
+
+    // x scale — one band per sorted position
+    const x = d3.scaleBand()
+        .domain(records.map((_, i) => i))
+        .range([0, width])
+        .padding(0.2)
+
+    // sub-scale for grouped bars within each position
+    const xSub = d3.scaleBand()
+        .domain(["n_events", "tree_length"])
+        .range([0, x.bandwidth()])
+        .padding(0.05)
+
+    // y scale — covers both metrics
+    const y = d3.scaleLinear()
+        .domain([0, d3.max(records, d => Math.max(d.tree_length_medicc, d.n_events_ground_truth)) * 1.1])
+        .range([height, 0])
+
+    // x axis — label by sorted rank (0 = shortest tree)
+    svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(x).tickFormat(i => records[i].iteration))
+        .selectAll("text")
+        .attr("transform", "rotate(-45)")
+        .style("text-anchor", "end")
+
+    // x axis label
+    svg.append("text")
+        .attr("x", width / 2).attr("y", height + 45)
+        .attr("text-anchor", "middle")
+        .style("font-size", "12px")
+        .text("Iteration (sorted by tree length, ascending)")
+
+    // y axis
+    svg.append("g").call(d3.axisLeft(y))
+
+    // y axis label
+    svg.append("text")
+        .attr("transform", "rotate(-90)")
+        .attr("y", -45).attr("x", -height / 2)
+        .attr("text-anchor", "middle")
+        .style("font-size", "12px")
+        .text("Value")
+
+    // tree_length bars
+    svg.selectAll(".bar-tree")
+        .data(records)
+        .enter().append("rect")
+        .attr("class", "bar")
+        .attr("x", (_, i) => x(i) + xSub("tree_length"))
+        .attr("y", d => y(d.tree_length_medicc))
+        .attr("width", xSub.bandwidth())
+        .attr("height", d => height - y(d.tree_length_medicc))
+        .attr("fill", color)
+        .on("click", (event, d) => {
+            // console.log("clicked iteration", d.iteration, "leaf_count", d.leaf_count)
+            window.location.href = `tree_view.html?leaf_count=${d.leaf_count}&iteration=${d.iteration}`
+        })
+
+    // n_events bars (lighter shade)
+    svg.selectAll(".bar-events")
+        .data(records)
+        .enter().append("rect")
+        .attr("class", "bar")
+        .attr("x", (_, i) => x(i) + xSub("n_events"))
+        .attr("y", d => y(d.n_events_ground_truth))
+        .attr("width", xSub.bandwidth())
+        .attr("height", d => height - y(d.n_events_ground_truth))
+        .attr("fill", color)
+        .attr("opacity", 0.4)
+        .on("click", (event, d) => {
+            // console.log("clicked iteration", d.iteration, "leaf_count", d.leaf_count)
+            window.location.href = `tree_view.html?leaf_count=${d.leaf_count}&iteration=${d.iteration}`
+        })
+
+    // value labels on tree_length bars
+    svg.selectAll(".label-tree")
+        .data(records)
+        .enter().append("text")
+        .attr("x", (_, i) => x(i) + xSub("tree_length") + xSub.bandwidth() / 2)
+        .attr("y", d => y(d.tree_length_medicc) - 4)
+        .attr("text-anchor", "middle")
+        .style("font-size", "10px")
+        .style("fill", "#333")
+        .text(d => d.tree_length_medicc)
+
+    // value labels on n_events bars
+    svg.selectAll(".label-events")
+        .data(records)
+        .enter().append("text")
+        .attr("x", (_, i) => x(i) + xSub("n_events") + xSub.bandwidth() / 2)
+        .attr("y", d => y(d.n_events_ground_truth) - 4)
+        .attr("text-anchor", "middle")
+        .style("font-size", "10px")
+        .style("fill", "#333")
+        .text(d => d.n_events_ground_truth)
+
+    // legend
+    const legend = svg.append("g").attr("transform", `translate(${width - 300}, -35)`)
+    legend.append("rect").attr("width", 14).attr("height", 14).attr("fill", color).attr("opacity", 0.4)
+    legend.append("text").attr("x", 22).attr("y", 12).style("font-size", "13px").text("Ground truth event count")
+    legend.append("rect").attr("y", 22).attr("width", 14).attr("height", 14).attr("fill", color)
+    legend.append("text").attr("x", 22).attr("y", 34).style("font-size", "13px").text("medicc2-given-ground-truth-tree-topology tree length")
+}
+</script>
+
+</body>
+</html>
