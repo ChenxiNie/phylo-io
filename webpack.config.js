@@ -2,6 +2,11 @@ const path = require('path');
 const webpack = require('webpack');
 
 module.exports = {
+    plugins: [
+        new webpack.ProvidePlugin({
+            process: 'process/browser',
+        }),
+    ],
     entry: './src/index.js',
     mode: 'development',
     output: {
@@ -19,6 +24,8 @@ module.exports = {
             https: require.resolve("https-browserify"),
             os: require.resolve("os-browserify"),
             url: require.resolve("url"),
+            vm: false,
+            process: require.resolve('process/browser'),
         }
     },
     optimization: {

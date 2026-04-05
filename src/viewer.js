@@ -1193,8 +1193,18 @@ export default class Viewer {
 
         }
 
+        const clickX = event.pageX
+        const clickY = event.pageY
 
-
+        menu.push({
+            title: 'Show CN profile',
+            action: () => {
+                d3.select("#menu-node").remove()
+                if (this.container_object.api.settings.on_show_cn_profile){
+                    this.container_object.api.settings.on_show_cn_profile(node.data.name, clickX, clickY, this.container_object.div_id)
+                }
+            }
+        })
 
         menu.push({
             title: 'Close' ,
