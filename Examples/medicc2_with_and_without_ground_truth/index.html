@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>medicc2 with vs without ground truth topology</title>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 0;
+            background: #f8f8f8;
+            font-family: sans-serif;
+        }
+        #header {
+            padding: 14px 32px;
+            background: #222;
+            color: white;
+        }
+        #header h1 { margin: 0; font-size: 18px; font-weight: normal; }
+        #header p  { margin: 4px 0 0; font-size: 12px; color: #aaa; }
+
+        #chart-area {
+            padding: 16px 32px;
+            overflow-x: auto;
+        }
+
+        .legend {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            align-items: center;
+        }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-dot {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot {
+            cursor: pointer;
+        }
+        .dot:hover {
+            stroke: #333;
+            stroke-width: 1.5px;
+        }
+
+        .axis-label {
+            font-size: 12px;
+            fill: #555;
+        }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <h1>medicc2 — with vs without ground truth tree topology</h1>
+    <p id="run-name"></p>
+</div>
+
+<div id="chart-area">
+    <div class="legend">
+        <span style="font-size:13px; color:#555; margin-right:4px;">Point color = tree_length comparison (medicc2 vs medicc2-with-gt):</span>
+        <div class="legend-item"><div class="legend-dot" style="background:#c0392b"></div> medicc2 infers more events</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#888"></div> equal</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#27ae60"></div> medicc2-gt infers more events</div>
+    </div>
+    <div id="plot"></div>
+</div>
+
+<script>
+fetch("src/data.json")
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById("run-name").textContent = data.run_name
+
+        const leafCounts = data.leaf_counts
+        const records = data.data
+
+        const colorMap = { red: "#c0392b", grey: "#888", green: "#27ae60" }
+
+        const margin = { top: 40, right: 60, bottom: 80, left: 90 }
+        const boxWidth = 320
+        const groupGap = 200
+        const totalWidth = leafCounts.length * (boxWidth + groupGap) + margin.left + margin.right + 200
+        const headerH = document.getElementById("header").offsetHeight
+        const legendH = document.querySelector(".legend").offsetHeight
+        const height = window.innerHeight - headerH - legendH - margin.top - margin.bottom - 48
+
+        const svg = d3.select("#plot")
+            .append("svg")
+            .attr("width", totalWidth)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`)
+
+        // x: one position per leaf_count group
+        const x = d3.scaleOrdinal()
+            .domain(leafCounts.map(String))
+            .range(leafCounts.map((_, i) => i * (boxWidth + groupGap) + boxWidth / 2))
+
+        // y: normalized RF, max driven by data + headroom
+        const y = d3.scaleLinear()
+            .domain([0, data.max_rf])
+            .range([height, 0])
+
+        // axes
+        svg.append("g")
+            .attr("transform", `translate(0,${height})`)
+            .call(d3.axisBottom(x).tickFormat(d => `leaves_${d}`))
+            .selectAll("text")
+            .style("font-size", "16px")
+
+        svg.append("g")
+            .call(d3.axisLeft(y).ticks(10))
+            .selectAll("text")
+            .style("font-size", "14px")
+
+        // y axis label
+        svg.append("text")
+            .attr("class", "axis-label")
+            .attr("transform", "rotate(-90)")
+            .attr("x", -height / 2)
+            .attr("y", -68)
+            .attr("text-anchor", "middle")
+            .style("font-size", "15px")
+            .text("Normalized RF distance")
+
+        // draw boxplot + jittered points per leaf_count
+        leafCounts.forEach(lc => {
+            const group = records.filter(d => d.leaf_count === lc)
+            const cx = x(String(lc))
+
+            // --- boxplot stats for medicc2 normalized_rf ---
+            const vals = group.map(d => d.normalized_rf_medicc2).sort(d3.ascending)
+            const q1  = d3.quantile(vals, 0.25)
+            const med = d3.quantile(vals, 0.5)
+            const q3  = d3.quantile(vals, 0.75)
+            const iqr = q3 - q1
+            const lo  = Math.max(d3.min(vals), q1 - 1.5 * iqr)
+            const hi  = Math.min(d3.max(vals), q3 + 1.5 * iqr)
+
+            const bw = boxWidth * 0.8
+
+            // whiskers
+            svg.append("line")
+                .attr("x1", cx).attr("x2", cx)
+                .attr("y1", y(lo)).attr("y2", y(hi))
+                .attr("stroke", "#999").attr("stroke-width", 1.5)
+
+            // whisker caps
+            ;[lo, hi].forEach(v => {
+                svg.append("line")
+                    .attr("x1", cx - bw / 4).attr("x2", cx + bw / 4)
+                    .attr("y1", y(v)).attr("y2", y(v))
+                    .attr("stroke", "#999").attr("stroke-width", 1.5)
+            })
+
+            // IQR box
+            svg.append("rect")
+                .attr("x", cx - bw / 2)
+                .attr("y", y(q3))
+                .attr("width", bw)
+                .attr("height", y(q1) - y(q3))
+                .attr("fill", "#ddeeff")
+                .attr("stroke", "#aac")
+                .attr("stroke-width", 1.5)
+
+            // median line
+            svg.append("line")
+                .attr("x1", cx - bw / 2).attr("x2", cx + bw / 2)
+                .attr("y1", y(med)).attr("y2", y(med))
+                .attr("stroke", "#336")
+                .attr("stroke-width", 2)
+
+            // deterministic beeswarm: group by exact y, spread horizontally
+            const r = 9
+            const diameter = r * 2 + 2
+
+            // group points that share the same y pixel value
+            const yGroups = d3.group(group, d => y(d.normalized_rf_medicc2))
+
+            const colorOrder = { red: 0, grey: 1, green: 2 }
+            yGroups.forEach((members, yPx) => {
+                members.sort((a, b) => colorOrder[a.color] - colorOrder[b.color])
+                const n = members.length
+                // spread: center the row, space by diameter
+                const offsets = members.map((_, i) => (i - (n - 1) / 2) * diameter)
+                members.forEach((d, i) => {
+                    svg.append("circle")
+                        .attr("class", "dot")
+                        .attr("cx", cx + offsets[i])
+                        .attr("cy", yPx)
+                        .attr("r", r)
+                        .attr("fill", colorMap[d.color])
+                        .attr("opacity", 0.85)
+                        .on("click", () => {
+                            window.location.href = `tree_view.html?leaf_count=${d.leaf_count}&iteration=${d.iteration}`
+                        })
+                        .append("title")
+                        .text(`iteration ${d.iteration}\nmedicc2 RF: ${d.normalized_rf_medicc2}\nmedicc2-gt RF: ${d.normalized_rf_medicc2_gt}\ntree_length medicc2: ${d.tree_length_medicc2}\ntree_length medicc2-gt: ${d.tree_length_medicc2_gt}`)
+                })
+            })
+        })
+    })
+</script>
+
+</body>
+</html>
